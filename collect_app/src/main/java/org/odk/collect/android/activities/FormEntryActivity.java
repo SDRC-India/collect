@@ -69,6 +69,7 @@ import org.javarosa.form.api.FormEntryController;
 import org.javarosa.form.api.FormEntryPrompt;
 import org.odk.collect.android.R;
 import org.odk.collect.android.application.Collect;
+import org.odk.collect.android.exception.GDriveConnectionException;
 import org.odk.collect.android.exception.JavaRosaException;
 import org.odk.collect.android.listeners.AdvanceToNextListener;
 import org.odk.collect.android.listeners.FormLoaderListener;
@@ -697,15 +698,17 @@ public class FormEntryActivity extends Activity implements AnimationListener,
                 break;
             case AUDIO_CAPTURE:
             case VIDEO_CAPTURE:
+                Uri mediaUri = intent.getData();
+                saveAudioVideoAnswer(mediaUri);
+                String filePath = MediaUtils.getDataColumn(this, mediaUri, null, null);
+                if (filePath != null) {
+                    new File(filePath).delete();
+                }
+                getContentResolver().delete(mediaUri, null, null);
+                break;
             case AUDIO_CHOOSER:
             case VIDEO_CHOOSER:
-                // For audio/video capture/chooser, we get the URI from the content
-                // provider
-                // then the widget copies the file and makes a new entry in the
-                // content provider.
-                Uri media = intent.getData();
-                ((ODKView) mCurrentView).setBinaryData(media);
-                saveAnswersForCurrentScreen(DO_NOT_EVALUATE_CONSTRAINTS);
+                saveAudioVideoAnswer(intent.getData());
                 break;
             case LOCATION_CAPTURE:
                 String sl = intent.getStringExtra(LOCATION_RESULT);
@@ -743,29 +746,50 @@ public class FormEntryActivity extends Activity implements AnimationListener,
         String destImagePath = mInstanceFolder1 + File.separator
                 + System.currentTimeMillis() + ".jpg";
 
-        File chosenImage = MediaUtils.getFileFromUri(this, selectedImage, Images.Media.DATA);
-        if (chosenImage != null) {
-            final File newImage = new File(destImagePath);
-            FileUtils.copyFile(chosenImage, newImage);
+        File chosenImage;
+        try {
+            chosenImage = MediaUtils.getFileFromUri(this, selectedImage, Images.Media.DATA);
+            if (chosenImage != null) {
+                final File newImage = new File(destImagePath);
+                FileUtils.copyFile(chosenImage, newImage);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        dismissDialog(SAVING_IMAGE_DIALOG);
+                        ((ODKView) mCurrentView).setBinaryData(newImage);
+                        saveAnswersForCurrentScreen(DO_NOT_EVALUATE_CONSTRAINTS);
+                        refreshCurrentView();
+                    }
+                });
+            } else {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        dismissDialog(SAVING_IMAGE_DIALOG);
+                        Log.e(t, "Could not receive chosen image");
+                        showCustomToast(getString(R.string.error_occured), Toast.LENGTH_SHORT);
+                    }
+                });
+            }
+        } catch (GDriveConnectionException e) {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     dismissDialog(SAVING_IMAGE_DIALOG);
-                    ((ODKView) mCurrentView).setBinaryData(newImage);
-                    saveAnswersForCurrentScreen(DO_NOT_EVALUATE_CONSTRAINTS);
-                    refreshCurrentView();
-                }
-            });
-        } else {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    dismissDialog(SAVING_IMAGE_DIALOG);
-                    Log.e(t, "Could not receive chosen image");
-                    showCustomToast(getString(R.string.error_occured), Toast.LENGTH_SHORT);
+                    Log.e(t, "Could not receive chosen image due to connection problem");
+                    showCustomToast(getString(R.string.gdrive_connection_exception), Toast.LENGTH_LONG);
                 }
             });
         }
+    }
+
+    private void saveAudioVideoAnswer(Uri media) {
+        // For audio/video capture/chooser, we get the URI from the content
+        // provider
+        // then the widget copies the file and makes a new entry in the
+        // content provider.
+        ((ODKView) mCurrentView).setBinaryData(media);
+        saveAnswersForCurrentScreen(DO_NOT_EVALUATE_CONSTRAINTS);
     }
 
     /**
@@ -2584,6 +2608,11 @@ public class FormEntryActivity extends Activity implements AnimationListener,
                 }
                 Toast.makeText(this, message,
                         Toast.LENGTH_LONG).show();
+                break;
+            case SaveToDiskTask.ENCRYPTION_ERROR:
+                Toast.makeText(this, String.format(getString(R.string.encryption_error_message),
+                        saveResult.getSaveErrorMessage()), Toast.LENGTH_LONG).show();
+                finishReturnInstance();
                 break;
             case FormEntryController.ANSWER_CONSTRAINT_VIOLATED:
             case FormEntryController.ANSWER_REQUIRED_BUT_EMPTY:
