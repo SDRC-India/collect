@@ -38,6 +38,7 @@ import org.odk.collect.android.application.Collect;
 import org.odk.collect.android.exception.JavaRosaException;
 import org.odk.collect.android.logic.FormController;
 import org.odk.collect.android.logic.HierarchyElement;
+import org.odk.collect.android.utilities.ApplicationConstants;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -72,8 +73,7 @@ public class FormHierarchyActivity extends ListActivity {
         // We use a static FormEntryController to make jumping faster.
         mStartIndex = formController.getFormIndex();
 
-        setTitle(getString(R.string.app_name) + " > "
-                + formController.getFormTitle());
+        setTitle(formController.getFormTitle());
 
         mPath = (TextView) findViewById(R.id.pathtext);
 
@@ -100,23 +100,23 @@ public class FormHierarchyActivity extends ListActivity {
                 finish();
             }
         });
+        if (getIntent().getStringExtra(ApplicationConstants.BundleKeys.FORM_MODE).equalsIgnoreCase(ApplicationConstants.FormModes.VIEW_SENT)) {
+            Collect.getInstance().getFormController().stepToOuterScreenEvent();
 
-        Intent parentIntent = this.getIntent();
-        if (!parentIntent.getStringExtra("Action").equalsIgnoreCase("EditSaved")) {
-
-            jumpBeginningButton.setText("Exit");
-            jumpBeginningButton.setOnClickListener(new OnClickListener() {
+            Button exitButton = (Button) findViewById(R.id.exitButton);
+            exitButton.setOnClickListener(new OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    Collect.getInstance().getActivityLogger().logInstanceAction(this, "jumpToBeginning", "click");
+                    Collect.getInstance().getActivityLogger().logInstanceAction(this, "exit",
+                            "click");
                     setResult(RESULT_OK);
                     finish();
                 }
             });
 
-            jumpEndButton.setEnabled(false);
+            exitButton.setVisibility(View.VISIBLE);
+            jumpBeginningButton.setVisibility(View.GONE);
             jumpEndButton.setVisibility(View.GONE);
-
         }
 
         refreshView();
@@ -431,7 +431,7 @@ public class FormHierarchyActivity extends ListActivity {
                     }
                 }
                 setResult(RESULT_OK);
-                if (this.getIntent().getStringExtra("Action").equalsIgnoreCase("EditSaved")) {
+                if (getIntent().getStringExtra(ApplicationConstants.BundleKeys.FORM_MODE).equalsIgnoreCase(ApplicationConstants.FormModes.EDIT_SAVED)) {
                     finish();
                 }
                 return;

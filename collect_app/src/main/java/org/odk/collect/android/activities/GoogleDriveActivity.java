@@ -49,11 +49,10 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GooglePlayServicesClient.OnConnectionFailedListener;
 import com.google.android.gms.common.GooglePlayServicesUtil;
+import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.api.client.extensions.android.http.AndroidHttp;
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential;
 import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException;
@@ -71,7 +70,8 @@ import org.odk.collect.android.application.Collect;
 import org.odk.collect.android.listeners.GoogleDriveFormDownloadListener;
 import org.odk.collect.android.listeners.TaskListener;
 import org.odk.collect.android.logic.DriveListItem;
-import org.odk.collect.android.preferences.PreferencesActivity;
+import org.odk.collect.android.preferences.PreferenceKeys;
+import org.odk.collect.android.utilities.ToastUtils;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -88,7 +88,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Stack;
 
-public class GoogleDriveActivity extends ListActivity implements OnConnectionFailedListener,
+public class GoogleDriveActivity extends ListActivity implements GoogleApiClient.OnConnectionFailedListener,
         TaskListener, GoogleDriveFormDownloadListener {
 
     private final static int PROGRESS_DIALOG = 1;
@@ -159,7 +159,7 @@ public class GoogleDriveActivity extends ListActivity implements OnConnectionFai
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        setTitle(getString(R.string.app_name) + " > " + getString(R.string.google_drive));
+        setTitle(getString(R.string.google_drive));
         requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
 
         setProgressBarVisibility(true);
@@ -171,7 +171,7 @@ public class GoogleDriveActivity extends ListActivity implements OnConnectionFai
 
         // ensure we have a google account selected
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        mGoogleUsername = prefs.getString(PreferencesActivity.KEY_SELECTED_GOOGLE_ACCOUNT, null);
+        mGoogleUsername = prefs.getString(PreferenceKeys.KEY_SELECTED_GOOGLE_ACCOUNT, null);
         if (mGoogleUsername == null || mGoogleUsername.equals("")) {
             showDialog(GOOGLE_USER_DIALOG);
             return;
@@ -340,7 +340,7 @@ public class GoogleDriveActivity extends ListActivity implements OnConnectionFai
             mCurrentPath.clear();
             listFiles(ROOT_KEY, mSearchText.getText().toString());
         } else {
-            Toast.makeText(this, R.string.no_blank_search, Toast.LENGTH_SHORT).show();
+            ToastUtils.showShortToast(R.string.no_blank_search);
         }
     }
 

@@ -31,9 +31,11 @@ import android.widget.TextView;
 
 import org.odk.collect.android.R;
 import org.odk.collect.android.application.Collect;
+import org.odk.collect.android.dao.FormsDao;
 import org.odk.collect.android.listeners.DiskSyncListener;
 import org.odk.collect.android.provider.FormsProviderAPI.FormsColumns;
 import org.odk.collect.android.tasks.DiskSyncTask;
+import org.odk.collect.android.utilities.ApplicationConstants;
 import org.odk.collect.android.utilities.VersionHidingCursorAdapter;
 
 /**
@@ -66,10 +68,10 @@ public class FormChooserList extends ListActivity implements DiskSyncListener {
         }
 
         setContentView(R.layout.chooser_list_layout);
-        setTitle(getString(R.string.app_name) + " > " + getString(R.string.enter_data));
+        setTitle(getString(R.string.enter_data));
 
         String sortOrder = FormsColumns.DISPLAY_NAME + " ASC, " + FormsColumns.JR_VERSION + " DESC";
-        Cursor c = managedQuery(FormsColumns.CONTENT_URI, null, null, null, sortOrder);
+        Cursor c = new FormsDao().getFormsCursor(sortOrder);
 
         String[] data = new String[]{
                 FormsColumns.DISPLAY_NAME, FormsColumns.DISPLAY_SUBTEXT, FormsColumns.JR_VERSION
@@ -134,7 +136,9 @@ public class FormChooserList extends ListActivity implements DiskSyncListener {
             setResult(RESULT_OK, new Intent().setData(formUri));
         } else {
             // caller wants to view/edit a form, so launch formentryactivity
-            startActivity(new Intent(Intent.ACTION_EDIT, formUri));
+            Intent intent = new Intent(Intent.ACTION_EDIT, formUri);
+            intent.putExtra(ApplicationConstants.BundleKeys.FORM_MODE, ApplicationConstants.FormModes.EDIT_SAVED);
+            startActivity(intent);
         }
 
         finish();
@@ -147,7 +151,7 @@ public class FormChooserList extends ListActivity implements DiskSyncListener {
         super.onResume();
 
         if (mDiskSyncTask.getStatus() == AsyncTask.Status.FINISHED) {
-            SyncComplete(mDiskSyncTask.getStatusMessage());
+            syncComplete(mDiskSyncTask.getStatusMessage());
         }
     }
 
@@ -175,8 +179,9 @@ public class FormChooserList extends ListActivity implements DiskSyncListener {
     /**
      * Called by DiskSyncTask when the task is finished
      */
+
     @Override
-    public void SyncComplete(String result) {
+    public void syncComplete(String result) {
         Log.i(t, "disk sync task complete");
         TextView tv = (TextView) findViewById(R.id.status_text);
         tv.setText(result);

@@ -21,6 +21,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.ListView;
@@ -30,9 +31,12 @@ import android.widget.TextView;
 import org.odk.collect.android.R;
 import org.odk.collect.android.adapters.ViewSentListAdapter;
 import org.odk.collect.android.application.Collect;
-import org.odk.collect.android.provider.FormsProviderAPI;
+import org.odk.collect.android.dao.InstancesDao;
+import org.odk.collect.android.listeners.DiskSyncListener;
 import org.odk.collect.android.provider.InstanceProviderAPI;
 import org.odk.collect.android.provider.InstanceProviderAPI.InstanceColumns;
+import org.odk.collect.android.tasks.InstanceSyncTask;
+import org.odk.collect.android.utilities.ApplicationConstants;
 
 /**
  * Responsible for displaying all the valid instances in the instance directory.
@@ -40,11 +44,13 @@ import org.odk.collect.android.provider.InstanceProviderAPI.InstanceColumns;
  * @author Yaw Anokwa (yanokwa@gmail.com)
  * @author Carl Hartung (carlhartung@gmail.com)
  */
-public class InstanceChooserList extends ListActivity {
+public class InstanceChooserList extends ListActivity implements DiskSyncListener {
 
     private static final boolean EXIT = true;
     private static final boolean DO_NOT_EXIT = false;
     private AlertDialog mAlertDialog;
+
+    private InstanceSyncTask instanceSyncTask;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -59,46 +65,43 @@ public class InstanceChooserList extends ListActivity {
         }
 
         setContentView(R.layout.chooser_list_layout);
-        setTitle(getString(R.string.app_name) + " > " + getString(R.string.review_data));
-        TextView tv = (TextView) findViewById(R.id.status_text);
-        tv.setVisibility(View.GONE);
-        Intent i = this.getIntent();
-        String selection;
-        String sortOrder = InstanceColumns.STATUS + " DESC, " + InstanceColumns.DISPLAY_NAME + " ASC";
-        Cursor c;
 
-        if(i.getStringExtra("Action").equalsIgnoreCase("EditSaved")){
-            setTitle(getString(R.string.app_name) + " > " + getString(R.string.review_data));
-            selection = InstanceColumns.STATUS + " = ?";
-            String[] selectionArgs = {InstanceProviderAPI.STATUS_INCOMPLETE};
-            c = managedQuery(InstanceColumns.CONTENT_URI, null, selection, selectionArgs, sortOrder);
-        }
-        else{
-            setTitle(getString(R.string.app_name) + " > " + getString(R.string.view_data));
-            selection = InstanceColumns.STATUS + " = ? or " + InstanceColumns.STATUS + " = ?";
-            String[] selectionArgs = {InstanceProviderAPI.STATUS_SUBMITTED, InstanceProviderAPI.STATUS_SUBMITTED_AND_DELETED};
-            c = managedQuery(InstanceColumns.CONTENT_URI, null, selection, selectionArgs, sortOrder);
+        Cursor cursor;
+        InstancesDao instancesDao = new InstancesDao();
+        if (getIntent().getStringExtra(ApplicationConstants.BundleKeys.FORM_MODE).equalsIgnoreCase(ApplicationConstants.FormModes.EDIT_SAVED)) {
+            setTitle(getString(R.string.review_data));
+            cursor = instancesDao.getUnsentInstancesCursor();
+        } else {
+            setTitle(getString(R.string.view_sent_forms));
+            cursor = instancesDao.getSentInstancesCursor();
         }
 
         String[] data = new String[]{
-                InstanceColumns.DISPLAY_NAME, InstanceColumns.DISPLAY_SUBTEXT, InstanceColumns.DELETED_SUBTEXT
+                InstanceColumns.DISPLAY_NAME, InstanceColumns.DISPLAY_SUBTEXT, InstanceColumns.DELETED_DATE
         };
         int[] view = new int[]{
                 R.id.text1, R.id.text2, R.id.text4
         };
 
         // render total instance view
-        ViewSentListAdapter instances =
-        new ViewSentListAdapter(this, R.layout.two_item, c, data, view);
+        SimpleCursorAdapter instances;
+        if (getIntent().getStringExtra(ApplicationConstants.BundleKeys.FORM_MODE).equalsIgnoreCase(ApplicationConstants.FormModes.EDIT_SAVED)) {
+            instances = new SimpleCursorAdapter(this, R.layout.two_item, cursor, data, view);
+        } else {
+            ((TextView) findViewById(android.R.id.empty)).setText(R.string.no_items_display_sent_forms);
+            instances = new ViewSentListAdapter(this, R.layout.two_item, cursor, data, view);
+        }
         setListAdapter(instances);
-    }
 
+        instanceSyncTask = new InstanceSyncTask();
+        instanceSyncTask.setDiskSyncListener(this);
+        instanceSyncTask.execute();
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
     }
-
 
     /**
      * Stores the path of selected instance in the parent class and finishes.
@@ -113,61 +116,64 @@ public class InstanceChooserList extends ListActivity {
 
         Collect.getInstance().getActivityLogger().logAction(this, "onListItemClick",
                 instanceUri.toString());
+        if (view.findViewById(R.id.visible_off).getVisibility() != View.VISIBLE) {
+            String action = getIntent().getAction();
+            if (Intent.ACTION_PICK.equals(action)) {
+                // caller is waiting on a picked form
+                setResult(RESULT_OK, new Intent().setData(instanceUri));
+            } else {
+                // the form can be edited if it is incomplete or if, when it was
+                // marked as complete, it was determined that it could be edited
+                // later.
+                String status = c.getString(c.getColumnIndex(InstanceColumns.STATUS));
+                String strCanEditWhenComplete =
+                        c.getString(c.getColumnIndex(InstanceColumns.CAN_EDIT_WHEN_COMPLETE));
 
-        String status = c.getString(c.getColumnIndex(InstanceColumns.STATUS));
-        String selection = InstanceProviderAPI.InstanceColumns.JR_FORM_ID + " =? ";
-        String[] selectionArgs = {c.getString(c.getColumnIndex(InstanceProviderAPI.InstanceColumns.JR_FORM_ID))};
-
-        //getting blank form record
-        Cursor cursor = getContentResolver().query(FormsProviderAPI.FormsColumns.CONTENT_URI, null,selection
-                , selectionArgs, null);
-
-        //If size is zero
-        if(cursor != null && cursor.getCount() > 0) {
-            cursor.moveToFirst();
-            //checking whether the form encryption and status
-            String encryption = cursor.getString(cursor.getColumnIndex(InstanceProviderAPI.InstanceColumns.BASE64_RSA_PUBLIC_KEY));
-            if (encryption != null || status.equals(InstanceProviderAPI.STATUS_SUBMITTED_AND_DELETED)) {
-                //making the item non clickable if the form is encrypted or the sent data is deleted
-                listView.setClickable(false);
-            }else{
-                String action = getIntent().getAction();
-                if (Intent.ACTION_PICK.equals(action)) {
-                    // caller is waiting on a picked form
-                    setResult(RESULT_OK, new Intent().setData(instanceUri));
-                } else {
-                    // the form can be edited if it is incomplete or if, when it was
-                    // marked as complete, it was determined that it could be edited
-                    // later.
-                    String strCanEditWhenComplete =
-                            c.getString(c.getColumnIndex(InstanceColumns.CAN_EDIT_WHEN_COMPLETE));
-
-                    boolean canEdit = status.equals(InstanceProviderAPI.STATUS_INCOMPLETE)
-                            || Boolean.parseBoolean(strCanEditWhenComplete);
-                    if (!canEdit) {
-                        createErrorDialog(getString(R.string.cannot_edit_completed_form),
-                                DO_NOT_EXIT);
-                        return;
-                    }
-                    // caller wants to view/edit a form, so launch formentryactivity
-                    Intent parentIntent = this.getIntent();
-                    Intent intent = new Intent(Intent.ACTION_EDIT, instanceUri);
-                    if (parentIntent.getStringExtra("Action").equalsIgnoreCase("EditSaved")) {
-                        intent.putExtra("Action", "EditSaved");
-                    } else {
-                        intent.putExtra("Action", "ViewSent");
-                    }
-                    startActivity(intent);
+                boolean canEdit = status.equals(InstanceProviderAPI.STATUS_INCOMPLETE)
+                        || Boolean.parseBoolean(strCanEditWhenComplete);
+                if (!canEdit) {
+                    createErrorDialog(getString(R.string.cannot_edit_completed_form),
+                            DO_NOT_EXIT);
+                    return;
                 }
-                finish();
+                // caller wants to view/edit a form, so launch formentryactivity
+                Intent parentIntent = this.getIntent();
+                Intent intent = new Intent(Intent.ACTION_EDIT, instanceUri);
+                if (parentIntent.getStringExtra(ApplicationConstants.BundleKeys.FORM_MODE).equalsIgnoreCase(ApplicationConstants.FormModes.EDIT_SAVED)) {
+                    intent.putExtra(ApplicationConstants.BundleKeys.FORM_MODE, ApplicationConstants.FormModes.EDIT_SAVED);
+                } else {
+                    intent.putExtra(ApplicationConstants.BundleKeys.FORM_MODE, ApplicationConstants.FormModes.VIEW_SENT);
+                }
+                startActivity(intent);
             }
-        }else {
-            listView.setClickable(false);
+            finish();
         }
-        if(cursor != null){
-            cursor.close();
-        }
+    }
 
+    @Override
+    protected void onResume() {
+        if (instanceSyncTask != null) {
+            instanceSyncTask.setDiskSyncListener(this);
+        }
+        super.onResume();
+
+        if (instanceSyncTask.getStatus() == AsyncTask.Status.FINISHED) {
+            syncComplete(instanceSyncTask.getStatusMessage());
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (instanceSyncTask != null) {
+            instanceSyncTask.setDiskSyncListener(null);
+        }
+        super.onPause();
+    }
+
+    @Override
+    public void syncComplete(String result) {
+        TextView textView = (TextView) findViewById(R.id.status_text);
+        textView.setText(result);
     }
 
     @Override
